@@ -1,0 +1,76 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Reth Private Transaction",
+  "projectDescription": "A Reth extension that enables private transaction submission directly to block builders, protecting against frontrunning and MEV attacks.",
+  "theme": "aspen",
+  "primaryColor": "#2563EB",
+  "lightColor": "#3B82F6",
+  "darkColor": "#1E40AF",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/private-transactions",
+              "concepts/block-builders",
+              "concepts/mev-protection"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/installation",
+              "guides/node-setup",
+              "guides/sending-transactions"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "RPC Methods",
+            "pages": [
+              "api/rpc/send-private-raw-transaction"
+            ]
+          },
+          {
+            "group": "Library API",
+            "pages": [
+              "api/lib/builder",
+              "api/lib/builder-kind",
+              "api/lib/errors"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Custom RPC method eth_sendPrivateRawTransaction for private transaction submission",
+    "Support for multiple block builders (Titan, Beaverbuild, rsync-builder)",
+    "Protection against frontrunning and sandwich attacks",
+    "Seamless integration with Reth nodes",
+    "Parallel transaction submission to all builders",
+    "Automatic fallback if some builders fail"
+  ],
+  "publicApiSurface": [
+    "eth_sendPrivateRawTransaction (RPC method)",
+    "Builder (struct)",
+    "BuilderKind (enum)",
+    "BuilderError (enum)",
+    "Builder::send_tx (method)",
+    "BuilderKind::builder (method)"
+  ]
+}
