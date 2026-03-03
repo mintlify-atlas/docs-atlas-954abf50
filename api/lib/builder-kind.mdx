@@ -1,0 +1,140 @@
+---
+title: BuilderKind
+description: Enum representing supported MEV builder types
+---
+
+## Overview
+
+The `BuilderKind` enum represents the different MEV builder services supported by the library. Each variant corresponds to a specific builder with its own endpoint configuration.
+
+## Type definition
+
+```rust
+#[derive(Clone, EnumIter, Display)]
+pub enum BuilderKind {
+    Titan,
+    Beaver,
+    Rsync,
+}
+```
+
+## Variants
+
+### Titan
+
+Titan Builder endpoint configuration.
+
+<ParamField path="endpoint" type="BuilderEndpoint">
+  - **URL**: `https://rpc.titanbuilder.xyz`
+  - **RPC Method**: `eth_sendPrivateTransaction`
+</ParamField>
+
+### Beaver
+
+Beaver Build endpoint configuration.
+
+<ParamField path="endpoint" type="BuilderEndpoint">
+  - **URL**: `https://mevshare-rpc.beaverbuild.org`
+  - **RPC Method**: `eth_sendPrivateRawTransaction`
+</ParamField>
+
+### Rsync
+
+Rsync Builder endpoint configuration.
+
+<ParamField path="endpoint" type="BuilderEndpoint">
+  - **URL**: `https://rsync-builder.xyz`
+  - **RPC Method**: `eth_sendPrivateRawTransaction`
+</ParamField>
+
+## Methods
+
+### endpoint
+
+Returns the endpoint configuration for the builder variant.
+
+```rust
+fn endpoint(&self) -> BuilderEndpoint
+```
+
+<ResponseField name="BuilderEndpoint" type="BuilderEndpoint">
+  A struct containing the URL and RPC method name for the builder
+</ResponseField>
+
+<Note>
+  This method is private and used internally by the `builder()` method.
+</Note>
+
+### builder
+
+Creates a new `Builder` instance configured for this builder type.
+
+```rust
+pub fn builder(&self) -> Result<Builder, BuilderError>
+```
+
+<ResponseField name="Result" type="Result<Builder, BuilderError>">
+  Returns a configured `Builder` instance, or `BuilderError::ClientError` if the HTTP client cannot be initialized
+</ResponseField>
+
+#### Implementation details
+
+The method:
+1. Retrieves the endpoint configuration via `endpoint()`
+2. Builds a new HTTP client using `reqwest::Client::builder()`
+3. Returns a `Builder` struct with the client, endpoint, and builder kind
+
+## Usage example
+
+<Tabs>
+  <Tab title="Iterate all builders">
+    ```rust
+    use reth_private_transaction::BuilderKind;
+    use strum::IntoEnumIterator;
+
+    for kind in BuilderKind::iter() {
+        match kind.builder() {
+            Ok(builder) => {
+                info!(target: "builder", "Created builder: {}", kind);
+            }
+            Err(e) => warn!(target: "builder", "Failed to create builder for {}: {}", kind, e),
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="Create specific builder">
+    ```rust
+    use reth_private_transaction::BuilderKind;
+
+    let titan_builder = BuilderKind::Titan.builder()?;
+    let beaver_builder = BuilderKind::Beaver.builder()?;
+    let rsync_builder = BuilderKind::Rsync.builder()?;
+    ```
+  </Tab>
+  <Tab title="Display builder name">
+    ```rust
+    use reth_private_transaction::BuilderKind;
+
+    let kind = BuilderKind::Titan;
+    println!("Builder: {}", kind); // Prints: "Builder: Titan"
+    ```
+  </Tab>
+</Tabs>
+
+## Traits
+
+<ParamField path="Clone" type="trait">
+  The enum can be cloned to create copies
+</ParamField>
+
+<ParamField path="EnumIter" type="trait">
+  Provides iterator functionality via `strum::IntoEnumIterator` to iterate over all variants
+</ParamField>
+
+<ParamField path="Display" type="trait">
+  Implements `std::fmt::Display` to convert variants to their string representation
+</ParamField>
+
+## Source reference
+
+Defined in `src/lib.rs:29-64`

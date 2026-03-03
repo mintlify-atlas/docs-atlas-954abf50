@@ -1,0 +1,279 @@
+---
+title: Block builders
+description: Understand how reth-private-transaction integrates with multiple block builders
+---
+
+## Overview
+
+Block builders are specialized entities in the Ethereum ecosystem that construct blocks from transactions. The `reth-private-transaction` library integrates with multiple builders to maximize the chances of successful private transaction inclusion.
+
+<Info>
+By supporting multiple builders, the library provides redundancy and increases the probability that your transaction will be included in the next block.
+</Info>
+
+## Supported builders
+
+The library supports three major block builders, each with their own endpoint and RPC method:
+
+```rust
+#[derive(Clone, EnumIter, Display)]
+pub enum BuilderKind {
+    Titan,
+    Beaver,
+    Rsync,
+}
+```
+
+### Titan
+
+**Endpoint**: `https://rpc.titanbuilder.xyz`
+
+**RPC Method**: `eth_sendPrivateTransaction`
+
+Titan is configured with a unique RPC method name compared to the other builders:
+
+```rust
+BuilderKind::Titan => {
+    BuilderEndpoint::new("https://rpc.titanbuilder.xyz", "eth_sendPrivateTransaction")
+}
+```
+
+### Beaverbuild
+
+**Endpoint**: `https://mevshare-rpc.beaverbuild.org`
+
+**RPC Method**: `eth_sendPrivateRawTransaction`
+
+Beaverbuild operates through their MEVShare RPC endpoint:
+
+```rust
+BuilderKind::Beaver => BuilderEndpoint::new(
+    "https://mevshare-rpc.beaverbuild.org",
+    "eth_sendPrivateRawTransaction",
+)
+```
+
+### rsync-builder
+
+**Endpoint**: `https://rsync-builder.xyz`
+
+**RPC Method**: `eth_sendPrivateRawTransaction`
+
+```rust
+BuilderKind::Rsync => {
+    BuilderEndpoint::new("https://rsync-builder.xyz", "eth_sendPrivateRawTransaction")
+}
+```
+
+## Builder architecture
+
+Each builder is represented by a `Builder` struct that encapsulates the HTTP client, endpoint configuration, and builder identity:
+
+```rust
+pub struct Builder {
+    client: Client,
+    endpoint: BuilderEndpoint,
+    kind: BuilderKind,
+}
+```
+
+### Endpoint configuration
+
+The `BuilderEndpoint` struct stores the URL and RPC method for each builder:
+
+```rust
+pub struct BuilderEndpoint {
+    url: String,
+    rpc_method: String,
+}
+
+impl BuilderEndpoint {
+    fn new(url: &str, rpc_method: &str) -> Self {
+        Self {
+            url: url.to_string(),
+            rpc_method: rpc_method.to_string(),
+        }
+    }
+}
+```
+
+This abstraction allows the library to support different RPC method names across builders while maintaining a consistent internal interface.
+
+## Builder initialization
+
+Builders are created on-demand with error handling for initialization failures:
+
+```rust
+impl BuilderKind {
+    pub fn builder(&self) -> Result<Builder, BuilderError> {
+        let endpoint = self.endpoint();
+        let client = Client::builder()
+            .build()
+            .map_err(BuilderError::ClientError)?;
+
+        Ok(Builder {
+            client,
+            endpoint,
+            kind: self.clone(),
+        })
+    }
+}
+```
+
+<Note>
+If a builder fails to initialize, the library logs a warning and continues with the remaining builders. Only if all builders fail to initialize will the transaction submission fail.
+</Note>
+
+## Transaction submission
+
+Each builder receives transactions through a JSON-RPC POST request:
+
+```rust
+pub async fn send_tx(&self, tx: Bytes) -> Result<(), BuilderError> {
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "method": &self.endpoint.rpc_method,
+        "params": [{
+            "tx": tx
+        }],
+        "id": 1
+    });
+
+    trace!(target: "builder", ?payload, "Sending tx to builder: {}", self.kind);
+
+    let response = self
+        .client
+        .post(&self.endpoint.url)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(BuilderError::ClientError)?;
+
+    let response_body: Value = response.json().await.map_err(BuilderError::ClientError)?;
+
+    if response_body.get("error").is_some() {
+        warn!(target: "builder", ?response_body, "Builder returned an error: {}", self.kind);
+        return Err(BuilderError::InvalidResponse(response_body));
+    }
+
+    info!(target: "builder", ?response_body, "Tx sent successfully to builder: {}", self.kind);
+    Ok(())
+}
+```
+
+### Request format
+
+The payload structure adapts to each builder's expected RPC method:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "eth_sendPrivateTransaction" | "eth_sendPrivateRawTransaction",
+  "params": [{
+    "tx": "0x..."
+  }],
+  "id": 1
+}
+```
+
+<Tip>
+The library automatically handles the different RPC method names for each builder, so you don't need to worry about builder-specific formatting.
+</Tip>
+
+## Parallel distribution
+
+All builders receive transactions simultaneously using async parallel execution:
+
+```rust
+fn builders(&self) -> Vec<Builder> {
+    let mut builders = Vec::new();
+    for kind in BuilderKind::iter() {
+        match kind.builder() {
+            Ok(builder) => {
+                info!(target: "builder", "Sending tx to builder: {}", kind);
+                builders.push(builder);
+            }
+            Err(e) => warn!(target: "builder", "Failed to create builder for {}: {}", kind, e),
+        }
+    }
+    builders
+}
+```
+
+The `EnumIter` derive macro enables iterating over all builder types, ensuring every configured builder has an opportunity to receive the transaction.
+
+## Error handling
+
+Builder errors are categorized into two types:
+
+<Accordion title="ClientError">
+  HTTP client errors from the `reqwest` library, including network issues, connection failures, and timeouts.
+  
+  ```rust
+  #[error("HTTP client error: {0}")]
+  ClientError(#[from] reqwest::Error)
+  ```
+</Accordion>
+
+<Accordion title="InvalidResponse">
+  The builder returned an error in the JSON-RPC response body. This includes transaction validation failures or builder-specific rejections.
+  
+  ```rust
+  #[error("Invalid response from builder: {0}")]
+  InvalidResponse(Value)
+  ```
+</Accordion>
+
+## Logging and observability
+
+The library provides detailed logging at multiple levels:
+
+**Trace level**: Full request payloads before submission
+```rust
+trace!(target: "builder", ?payload, "Sending tx to builder: {}", self.kind);
+```
+
+**Info level**: Successful submissions and builder initialization
+```rust
+info!(target: "builder", ?response_body, "Tx sent successfully to builder: {}", self.kind);
+```
+
+**Warn level**: Builder errors and initialization failures
+```rust
+warn!(target: "builder", ?response_body, "Builder returned an error: {}", self.kind);
+```
+
+<Tip>
+Use the `builder` target to filter logs specifically related to builder communication when debugging transaction submission issues.
+</Tip>
+
+## Adding custom builders
+
+To add a new builder, extend the `BuilderKind` enum and implement the endpoint configuration:
+
+```rust
+#[derive(Clone, EnumIter, Display)]
+pub enum BuilderKind {
+    Titan,
+    Beaver,
+    Rsync,
+    // Add your custom builder here
+    MyBuilder,
+}
+
+impl BuilderKind {
+    fn endpoint(&self) -> BuilderEndpoint {
+        match self {
+            // ... existing builders ...
+            BuilderKind::MyBuilder => {
+                BuilderEndpoint::new(
+                    "https://my-builder.example.com",
+                    "eth_sendPrivateRawTransaction"
+                )
+            }
+        }
+    }
+}
+```
+
+The `EnumIter` macro will automatically include your new builder in the iteration and distribution logic.

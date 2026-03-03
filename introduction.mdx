@@ -1,0 +1,86 @@
+---
+title: Introduction
+description: Protect your transactions from frontrunning and MEV attacks by sending them directly to block builders
+---
+
+# Private transaction submission for Reth
+
+Extend [Reth](https://github.com/paradigmxyz/reth) with a custom RPC method that allows you to bypass the public mempool and send transactions directly to block builders, protecting against frontrunning and sandwich attacks.
+
+## What is reth-private-transaction?
+
+This project adds `eth_sendPrivateRawTransaction` to the standard Ethereum JSON-RPC API, enabling private transaction submission directly to trusted block builders. By keeping your transactions out of the public mempool until they're included in a block, you significantly reduce the risk of MEV extraction.
+
+<Note>
+When you send a transaction to the public mempool, it becomes visible to searchers and MEV bots who can frontrun, backrun, or sandwich your transaction. Private transaction submission prevents this by sending your transaction directly to block builders.
+</Note>
+
+## How it works
+
+The extension broadcasts your signed transaction to multiple block builders simultaneously:
+
+<CardGroup cols={3}>
+  <Card title="Titan" icon="cube">
+    High-performance builder with strong censorship resistance
+  </Card>
+  <Card title="Beaverbuild" icon="cube">
+    MEV-Share enabled builder for transaction privacy
+  </Card>
+  <Card title="rsync-builder" icon="cube">
+    Open-source builder supporting private order flow
+  </Card>
+</CardGroup>
+
+Your transaction is sent to all available builders concurrently. If at least one builder accepts it, the method returns your transaction hash. The first builder to include your transaction in a winning block gets it on-chain.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Protection from frontrunning" icon="shield-halved">
+    Keep your transactions private until they're included in a block
+  </Card>
+  <Card title="Multi-builder redundancy" icon="network-wired">
+    Automatically sends to multiple builders for higher inclusion rates
+  </Card>
+  <Card title="Drop-in compatibility" icon="plug">
+    Works as a standard Reth extension with familiar RPC patterns
+  </Card>
+  <Card title="No additional fees" icon="dollar-sign">
+    Only pay standard gas fees - no extra charges for privacy
+  </Card>
+</CardGroup>
+
+## Use cases
+
+**DeFi trading**  
+Protect your DEX trades from sandwich attacks and frontrunning bots
+
+**NFT minting**  
+Mint NFTs without having your transaction frontrun during high-demand drops
+
+**Large transfers**  
+Move significant amounts without advertising your intentions to the network
+
+**Smart contract interactions**  
+Execute sensitive contract calls without revealing your strategy
+
+## Quick links
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get started in 5 minutes
+  </Card>
+  <Card title="Reth documentation" icon="book" href="https://reth.rs">
+    Learn more about Reth
+  </Card>
+</CardGroup>
+
+## Why privacy matters
+
+The public Ethereum mempool is transparent by design. While this transparency is valuable for network health, it creates opportunities for MEV extraction:
+
+- **Frontrunning**: Bots see your transaction and submit their own with higher gas to execute first
+- **Sandwich attacks**: Your swap gets sandwiched between a frontrun buy and backrun sell, extracting value
+- **Transaction sniping**: High-value opportunities get stolen before your transaction executes
+
+Private transaction submission solves these problems by keeping your transaction invisible until it's safely included in a block.

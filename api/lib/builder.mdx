@@ -1,0 +1,108 @@
+---
+title: Builder
+description: Client for sending private transactions to MEV builders
+---
+
+## Overview
+
+The `Builder` struct provides a client interface for submitting private transactions to MEV builder endpoints. Each builder instance is configured with a specific endpoint and HTTP client.
+
+## Type definition
+
+```rust
+pub struct Builder {
+    client: Client,
+    endpoint: BuilderEndpoint,
+    kind: BuilderKind,
+}
+```
+
+<ParamField path="client" type="Client">
+  HTTP client for making requests to the builder endpoint
+</ParamField>
+
+<ParamField path="endpoint" type="BuilderEndpoint">
+  Builder endpoint configuration containing URL and RPC method name
+</ParamField>
+
+<ParamField path="kind" type="BuilderKind">
+  The type of builder (Titan, Beaver, or Rsync)
+</ParamField>
+
+## Methods
+
+### send_tx
+
+Sends a raw transaction to the builder's RPC endpoint.
+
+```rust
+pub async fn send_tx(&self, tx: Bytes) -> Result<(), BuilderError>
+```
+
+<ParamField path="tx" type="Bytes" required>
+  The raw transaction bytes to send to the builder
+</ParamField>
+
+<ResponseField name="Result" type="Result<(), BuilderError>">
+  Returns `Ok(())` on success, or a `BuilderError` if the request fails or the builder returns an error response
+</ResponseField>
+
+#### Behavior
+
+The method performs the following steps:
+
+1. Constructs a JSON-RPC 2.0 payload with the transaction
+2. Sends a POST request to the builder endpoint
+3. Parses the response and checks for errors
+4. Logs the result using the `builder` target
+
+<Note>
+  The method will return `BuilderError::InvalidResponse` if the builder returns an error field in the JSON-RPC response, even if the HTTP request succeeds.
+</Note>
+
+## Usage example
+
+<Tabs>
+  <Tab title="Creating builders">
+    ```rust
+    use reth_private_transaction::{Builder, BuilderKind};
+    use strum::IntoEnumIterator;
+
+    fn builders() -> Vec<Builder> {
+        let mut builders = Vec::new();
+        for kind in BuilderKind::iter() {
+            match kind.builder() {
+                Ok(builder) => {
+                    info!(target: "builder", "Sending tx to builder: {}", kind);
+                    builders.push(builder);
+                }
+                Err(e) => warn!(target: "builder", "Failed to create builder for {}: {}", kind, e),
+            }
+        }
+        builders
+    }
+    ```
+  </Tab>
+  <Tab title="Sending transactions">
+    ```rust
+    use futures::future::join_all;
+    use alloy_primitives::Bytes;
+
+    async fn send_tx_to_builders(tx: Bytes, builders: Vec<Builder>) -> Result<()> {
+        let results = join_all(
+            builders.iter().map(|builder| builder.send_tx(tx.clone()))
+        ).await;
+
+        if results.iter().all(|r| r.is_err()) {
+            return Err(PrivateTransactionError::AllBuildersFailed.into());
+        }
+
+        Ok(())
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Source reference
+
+Defined in `src/lib.rs:66-103`

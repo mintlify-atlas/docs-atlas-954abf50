@@ -1,0 +1,237 @@
+---
+title: MEV protection
+description: Learn how reth-private-transaction protects against MEV attacks
+---
+
+## What is MEV?
+
+Maximal Extractable Value (MEV) refers to the profit that can be extracted by reordering, including, or excluding transactions within a block. This creates opportunities for sophisticated actors to profit at the expense of regular users.
+
+<Info>
+MEV was originally called "Miner Extractable Value" when miners built blocks. With the transition to Proof of Stake, block builders now construct blocks, so the term evolved to "Maximal Extractable Value."
+</Info>
+
+## Common MEV attacks
+
+### Frontrunning
+
+Frontrunning occurs when an attacker observes a profitable transaction in the mempool and submits their own transaction with a higher gas price to execute before the victim's transaction.
+
+**Example scenario**: You submit a transaction to buy a token on a DEX. An attacker sees this, submits a buy order before yours with higher gas, then sells immediately after your transaction executes, profiting from the price movement you created.
+
+### Sandwich attacks
+
+A sandwich attack is a sophisticated form of frontrunning where the attacker places one transaction before and one after the victim's transaction.
+
+**Example scenario**:
+1. You submit a large swap on a DEX
+2. Attacker submits a buy transaction with higher gas (executes first)
+3. Your swap executes at a worse price due to the attacker's trade
+4. Attacker submits a sell transaction (executes after yours)
+5. Attacker profits from the price slippage you experienced
+
+<Note>
+Sandwich attacks are particularly damaging because they guarantee profit for the attacker while maximizing the victim's slippage.
+</Note>
+
+## How this library provides protection
+
+The `reth-private-transaction` library protects against MEV attacks by keeping transactions private until they are included in a block:
+
+### Bypassing the public mempool
+
+The core protection mechanism is routing transactions directly to block builders:
+
+```rust
+async fn send_private_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
+    let builders = self.builders();
+    if builders.is_empty() {
+        return Err(PrivateTransactionError::FailedToGetBuilders.into());
+    }
+    let recovered = recover_raw_transaction::<TransactionSigned>(&tx)?;
+    let hash = *recovered.hash();
+    self.send_tx_to_builders(tx, builders).await?;
+    Ok(hash.into())
+}
+```
+
+Instead of broadcasting to the peer-to-peer mempool where anyone can see pending transactions, the library sends transactions exclusively to trusted block builders through private RPC endpoints.
+
+### Multi-builder redundancy
+
+The library sends transactions to multiple builders simultaneously:
+
+```rust
+async fn send_tx_to_builders(&self, tx: Bytes, builders: Vec<Builder>) -> RpcResult<()> {
+    let results = join_all(builders.iter().map(|builder| builder.send_tx(tx.clone()))).await;
+
+    if results.iter().all(|r| r.is_err()) {
+        return Err(PrivateTransactionError::AllBuildersFailed.into());
+    }
+
+    Ok(())
+}
+```
+
+This approach provides several benefits:
+
+**Increased inclusion probability**: If one builder doesn't produce the next block, another might
+
+**Failover protection**: If one builder is down or rejects the transaction, others can still process it
+
+**Decentralization**: Relying on multiple builders reduces dependency on any single entity
+
+## Protection guarantees
+
+<Accordion title="What is protected">
+  **Transaction content privacy**: The transaction details are not visible in the public mempool
+  
+  **Ordering protection**: Attackers cannot see your transaction to frontrun or sandwich it
+  
+  **Target price protection**: For DEX swaps, you get the expected price without artificial slippage from MEV attacks
+</Accordion>
+
+<Accordion title="What is not protected">
+  **Builder-level MEV**: Block builders themselves can still reorder transactions within their blocks
+  
+  **Cross-block MEV**: If your transaction is delayed to a future block, attackers might react to on-chain state changes
+  
+  **Failed transactions**: If the transaction fails, it may be visible in failed transaction logs
+</Accordion>
+
+<Tip>
+For maximum protection, combine private transactions with appropriate slippage tolerances and deadline parameters in your smart contract interactions.
+</Tip>
+
+## Builder trust model
+
+The library integrates with established block builders:
+
+```rust
+impl BuilderKind {
+    fn endpoint(&self) -> BuilderEndpoint {
+        match self {
+            BuilderKind::Titan => {
+                BuilderEndpoint::new("https://rpc.titanbuilder.xyz", "eth_sendPrivateTransaction")
+            }
+            BuilderKind::Beaver => BuilderEndpoint::new(
+                "https://mevshare-rpc.beaverbuild.org",
+                "eth_sendPrivateRawTransaction",
+            ),
+            BuilderKind::Rsync => {
+                BuilderEndpoint::new("https://rsync-builder.xyz", "eth_sendPrivateRawTransaction")
+            }
+        }
+    }
+}
+```
+
+These builders have reputations to maintain and are subject to market competition. However, you should understand the trust assumptions:
+
+**Builder visibility**: The builder can see your transaction contents
+
+**Reordering capability**: The builder can reorder transactions within their block
+
+**Censorship risk**: A builder could theoretically censor your transaction
+
+By distributing to multiple builders, the library mitigates single-builder risks.
+
+## Error handling and resilience
+
+The library provides robust error handling to maintain protection even when builders fail:
+
+```rust
+fn builders(&self) -> Vec<Builder> {
+    let mut builders = Vec::new();
+    for kind in BuilderKind::iter() {
+        match kind.builder() {
+            Ok(builder) => {
+                info!(target: "builder", "Sending tx to builder: {}", kind);
+                builders.push(builder);
+            }
+            Err(e) => warn!(target: "builder", "Failed to create builder for {}: {}", kind, e),
+        }
+    }
+    builders
+}
+```
+
+If individual builders fail:
+- The library logs a warning but continues with other builders
+- Only if all builders fail does the transaction submission fail
+- This ensures maximum resilience and protection coverage
+
+## Comparison with public mempool
+
+| Aspect | Public Mempool | Private Transaction |
+|--------|----------------|---------------------|
+| Visibility | Anyone can see pending transactions | Only builders see transactions |
+| Frontrunning risk | High | None |
+| Sandwich attack risk | High | None |
+| Gas price competition | Must outbid attackers | No artificial competition |
+| Inclusion time | Typically faster | May vary by builder |
+| Privacy | None | High |
+
+## Real-world use cases
+
+<Accordion title="DEX trading">
+  Protect large swaps from sandwich attacks that cause excessive slippage. Private transactions ensure you get the expected price without artificial manipulation.
+  
+  ```json
+  {
+    "jsonrpc": "2.0",
+    "method": "eth_sendPrivateRawTransaction",
+    "params": ["0x..."],  // Signed DEX swap transaction
+    "id": 1
+  }
+  ```
+</Accordion>
+
+<Accordion title="NFT purchases">
+  When buying valuable NFTs, prevent frontrunning by users monitoring the mempool for popular NFT purchases.
+</Accordion>
+
+<Accordion title="Liquidations">
+  Execute liquidation transactions without alerting competitors in the mempool who might race to liquidate the same position.
+</Accordion>
+
+<Accordion title="Time-sensitive DeFi operations">
+  Any transaction where timing and price are critical benefits from MEV protection, including oracle updates, arbitrage, and flash loans.
+</Accordion>
+
+## Monitoring and verification
+
+The library provides detailed logging to verify protection is working:
+
+```rust
+trace!(target: "builder", ?payload, "Sending tx to builder: {}", self.kind);
+
+if response_body.get("error").is_some() {
+    warn!(target: "builder", ?response_body, "Builder returned an error: {}", self.kind);
+    return Err(BuilderError::InvalidResponse(response_body));
+}
+
+info!(target: "builder", ?response_body, "Tx sent successfully to builder: {}", self.kind);
+```
+
+**Trace logs**: Show exact payloads sent to builders
+
+**Info logs**: Confirm successful submission to builders
+
+**Warn logs**: Alert you to builder errors or rejections
+
+<Tip>
+Monitor the `builder` log target to verify your transactions are being distributed to all configured builders successfully.
+</Tip>
+
+## Best practices
+
+**Use appropriate slippage**: Even with MEV protection, set reasonable slippage tolerances for DEX trades
+
+**Add transaction deadlines**: Include deadline parameters to prevent execution at stale prices
+
+**Monitor builder status**: Check logs to ensure builders are accepting your transactions
+
+**Combine protections**: Use private transactions alongside other DeFi safety features like slippage protection and time locks
+
+**Understand the limits**: Remember that builders themselves can still extract MEV, though they have reputational incentives not to

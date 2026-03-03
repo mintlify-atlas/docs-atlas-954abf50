@@ -1,0 +1,135 @@
+---
+title: Private transactions
+description: Learn how private transactions work and why they're essential for MEV protection
+---
+
+## What are private transactions?
+
+Private transactions are Ethereum transactions that bypass the public mempool and are sent directly to block builders. This approach keeps transaction details hidden from the public until they are included in a block, protecting users from MEV attacks like frontrunning and sandwich attacks.
+
+<Info>
+The public mempool is a waiting area where pending transactions are visible to everyone. Malicious actors monitor the mempool to identify profitable opportunities to frontrun or sandwich legitimate transactions.
+</Info>
+
+## How it works
+
+The `reth-private-transaction` library extends reth with a custom RPC method that routes transactions directly to trusted block builders:
+
+```rust
+#[rpc(server, namespace = "eth")]
+#[async_trait]
+pub trait EthPrivateTransactionApi {
+    #[method(name = "sendPrivateRawTransaction")]
+    async fn send_private_raw_transaction(&self, tx: Bytes) -> RpcResult<B256>;
+}
+```
+
+This method is registered in the `eth` namespace alongside standard Ethereum RPC methods, making it easy to integrate into existing workflows.
+
+## Transaction flow
+
+When you submit a private transaction, the following process occurs:
+
+<Steps>
+  <Step title="Transaction submission">
+    You send a signed raw transaction to the `eth_sendPrivateRawTransaction` RPC method.
+  </Step>
+  
+  <Step title="Builder distribution">
+    The library simultaneously sends your transaction to all configured block builders (Titan, Beaverbuild, rsync-builder).
+  </Step>
+  
+  <Step title="Parallel execution">
+    All builder submissions happen in parallel using `join_all` for maximum speed and redundancy:
+    
+    ```rust
+    async fn send_tx_to_builders(&self, tx: Bytes, builders: Vec<Builder>) -> RpcResult<()> {
+        let results = join_all(builders.iter().map(|builder| builder.send_tx(tx.clone()))).await;
+
+        if results.iter().all(|r| r.is_err()) {
+            return Err(PrivateTransactionError::AllBuildersFailed.into());
+        }
+
+        Ok(())
+    }
+    ```
+  </Step>
+  
+  <Step title="Success confirmation">
+    The method returns the transaction hash if at least one builder successfully accepts the transaction.
+  </Step>
+</Steps>
+
+<Note>
+The library requires at least one builder to successfully accept the transaction. If all builders fail, an `AllBuildersFailed` error is returned.
+</Note>
+
+## Transaction recovery
+
+Before sending to builders, the library recovers the transaction hash from the signed raw transaction data:
+
+```rust
+async fn send_private_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
+    let builders = self.builders();
+    if builders.is_empty() {
+        return Err(PrivateTransactionError::FailedToGetBuilders.into());
+    }
+    let recovered = recover_raw_transaction::<TransactionSigned>(&tx)?;
+    let hash = *recovered.hash();
+    self.send_tx_to_builders(tx, builders).await?;
+    Ok(hash.into())
+}
+```
+
+This allows the method to return the transaction hash immediately, matching the behavior of the standard `eth_sendRawTransaction` method.
+
+## API usage
+
+Submit a private transaction using standard JSON-RPC:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "eth_sendPrivateRawTransaction",
+  "params": ["0x..."],
+  "id": 1
+}
+```
+
+<Tip>
+The transaction must be signed before submission, just like with `eth_sendRawTransaction`. Use your preferred signing library (ethers.js, web3.js, viem, etc.) to create the signed raw transaction.
+</Tip>
+
+## Error handling
+
+The library defines specific error codes for different failure scenarios:
+
+<Accordion title="FailedToGetBuilders (-32000)">
+  No builders are available for transaction submission. This typically indicates a configuration issue or network connectivity problem.
+  
+  ```rust
+  PrivateTransactionError::FailedToGetBuilders => {
+      ErrorObject::owned(-32000, error.to_string(), None::<()>)
+  }
+  ```
+</Accordion>
+
+<Accordion title="AllBuildersFailed (-32001)">
+  All configured builders rejected the transaction. This could indicate an invalid transaction or temporary builder unavailability.
+  
+  ```rust
+  PrivateTransactionError::AllBuildersFailed => {
+      ErrorObject::owned(-32001, error.to_string(), None::<()>)
+  }
+  ```
+</Accordion>
+
+## Benefits
+
+**Privacy**: Your transaction details remain hidden from the public mempool until inclusion in a block.
+
+**MEV protection**: Frontrunning and sandwich attacks are prevented because attackers cannot see your pending transaction.
+
+**Redundancy**: Sending to multiple builders increases the likelihood of successful inclusion and provides failover capability.
+
+**Compatibility**: The API mirrors standard Ethereum RPC methods, requiring minimal changes to existing codebases.

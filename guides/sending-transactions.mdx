@@ -1,0 +1,280 @@
+---
+title: Sending transactions
+description: Learn how to send private transactions using the eth_sendPrivateRawTransaction RPC method
+---
+
+## Overview
+
+The `eth_sendPrivateRawTransaction` method allows you to submit transactions directly to block builders, bypassing the public mempool. This protects your transactions from frontrunning and sandwich attacks by keeping them private until inclusion in a block.
+
+<Note>
+  Transactions are sent to multiple builders simultaneously (Titan, Beaverbuild, and rsync-builder). 
+  The method returns successfully if at least one builder accepts the transaction.
+</Note>
+
+## How it works
+
+When you call `eth_sendPrivateRawTransaction`:
+
+<Steps>
+  <Step title="Transaction validation">
+    The node validates and recovers the signed transaction from the raw transaction bytes.
+  </Step>
+
+  <Step title="Parallel submission">
+    The transaction is sent concurrently to all available block builders:
+    - Titan (`https://rpc.titanbuilder.xyz`)
+    - Beaverbuild (`https://mevshare-rpc.beaverbuild.org`)
+    - rsync-builder (`https://rsync-builder.xyz`)
+  </Step>
+
+  <Step title="Response handling">
+    The method waits for all builders to respond and returns the transaction hash if at least 
+    one builder successfully accepts the transaction.
+  </Step>
+</Steps>
+
+## JSON-RPC request format
+
+### Request structure
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "eth_sendPrivateRawTransaction",
+  "params": ["0x..."],
+  "id": 1
+}
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `params[0]` | `string` | Signed raw transaction as a hex-encoded string |
+
+<Warning>
+  The transaction must be properly signed before submission. The raw transaction should be 
+  the RLP-encoded signed transaction with a `0x` prefix.
+</Warning>
+
+## Response format
+
+### Success response
+
+```json
+{
+  "jsonrpc": "2.0",
+  "result": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+  "id": 1
+}
+```
+
+The `result` field contains the transaction hash (32-byte hex string).
+
+### Error responses
+
+<CodeGroup>
+
+```json No builders available
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32000,
+    "message": "No builders available"
+  },
+  "id": 1
+}
+```
+
+```json All builders failed
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32001,
+    "message": "All builders failed to send tx"
+  },
+  "id": 1
+}
+```
+
+```json Invalid transaction
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32602,
+    "message": "Invalid params"
+  },
+  "id": 1
+}
+```
+
+</CodeGroup>
+
+## Example usage
+
+### Using curl
+
+```bash
+curl -X POST http://localhost:8545 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "eth_sendPrivateRawTransaction",
+    "params": ["0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a04f4c17305743700648bc4f6cd3038ec6f6af0df73e31757007b7f59df7bee88da07e1941b264348e80c78c4027afc65a87b0a5e43e86742b8ca0823584c6788fd0"],
+    "id": 1
+  }'
+```
+
+### Using ethers.js (JavaScript/TypeScript)
+
+```javascript
+const { ethers } = require('ethers');
+
+const provider = new ethers.JsonRpcProvider('http://localhost:8545');
+
+// Create and sign a transaction
+const wallet = new ethers.Wallet('YOUR_PRIVATE_KEY', provider);
+const tx = {
+  to: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
+  value: ethers.parseEther('0.1'),
+  gasLimit: 21000,
+  gasPrice: ethers.parseUnits('20', 'gwei')
+};
+
+const signedTx = await wallet.signTransaction(tx);
+
+// Send the private transaction
+const txHash = await provider.send('eth_sendPrivateRawTransaction', [
+  signedTx
+]);
+
+console.log('Transaction hash:', txHash);
+```
+
+### Using web3.py (Python)
+
+```python
+from web3 import Web3
+
+w3 = Web3(Web3.HTTPProvider('http://localhost:8545'))
+
+# Create and sign a transaction
+account = w3.eth.account.from_key('YOUR_PRIVATE_KEY')
+tx = {
+    'to': '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
+    'value': w3.to_wei(0.1, 'ether'),
+    'gas': 21000,
+    'gasPrice': w3.to_wei(20, 'gwei'),
+    'nonce': w3.eth.get_transaction_count(account.address),
+    'chainId': 1
+}
+
+signed_tx = account.sign_transaction(tx)
+
+# Send the private transaction
+tx_hash = w3.provider.make_request(
+    'eth_sendPrivateRawTransaction',
+    [signed_tx.rawTransaction.hex()]
+)
+
+print(f"Transaction hash: {tx_hash['result']}")
+```
+
+## Builder-specific behavior
+
+The extension sends transactions to each builder using their preferred RPC method:
+
+| Builder | Endpoint | RPC Method |
+|---------|----------|------------|
+| Titan | `https://rpc.titanbuilder.xyz` | `eth_sendPrivateTransaction` |
+| Beaverbuild | `https://mevshare-rpc.beaverbuild.org` | `eth_sendPrivateRawTransaction` |
+| rsync-builder | `https://rsync-builder.xyz` | `eth_sendPrivateRawTransaction` |
+
+<Tip>
+  Each builder may have different inclusion policies and timing. Sending to multiple 
+  builders increases the likelihood of fast inclusion while maintaining privacy.
+</Tip>
+
+## Best practices
+
+### Transaction signing
+
+Always sign transactions client-side before sending them to the RPC endpoint:
+
+1. Never send your private keys to the RPC server
+2. Use established libraries like ethers.js, web3.py, or web3.js for signing
+3. Verify the transaction details before signing
+
+### Gas pricing
+
+Private transactions should include competitive gas prices:
+
+- Builders prioritize transactions with higher gas prices
+- Consider using EIP-1559 transactions for better fee estimation
+- Monitor current network conditions before submitting
+
+### Error handling
+
+Implement proper error handling in your application:
+
+```javascript
+try {
+  const txHash = await provider.send('eth_sendPrivateRawTransaction', [
+    signedTx
+  ]);
+  console.log('Success:', txHash);
+} catch (error) {
+  if (error.code === -32001) {
+    console.error('All builders rejected the transaction');
+  } else if (error.code === -32000) {
+    console.error('No builders available');
+  } else {
+    console.error('Unexpected error:', error.message);
+  }
+}
+```
+
+### Monitoring transaction status
+
+After submission, monitor the transaction using standard Ethereum methods:
+
+```javascript
+// Wait for transaction receipt
+const receipt = await provider.waitForTransaction(txHash);
+console.log('Transaction confirmed in block:', receipt.blockNumber);
+```
+
+<Warning>
+  Private transactions may take longer to appear on-chain compared to public mempool 
+  transactions, as they depend on builder inclusion in the next block.
+</Warning>
+
+## Troubleshooting
+
+### Transaction not included
+
+If your transaction isn't being included:
+
+- Verify the gas price is competitive
+- Check that the nonce is correct and sequential
+- Ensure the transaction is valid (sufficient balance, correct chain ID)
+- Try resubmitting with a higher gas price
+
+### All builders failed error
+
+This error occurs when all builders reject the transaction:
+
+- Verify the transaction is properly signed
+- Check that the raw transaction hex is valid
+- Ensure builders are not experiencing downtime
+- Review builder-specific requirements and policies
+
+### Invalid transaction format
+
+If you receive an invalid params error:
+
+- Ensure the raw transaction is RLP-encoded
+- Verify the `0x` prefix is present
+- Check that the transaction includes all required fields
+- Validate the signature (v, r, s values)

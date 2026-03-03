@@ -1,0 +1,143 @@
+---
+title: Node setup
+description: Configure and run a Reth node with private transaction support
+---
+
+## Overview
+
+The reth-private-transaction binary is a drop-in replacement for the standard reth binary that includes an additional RPC method for private transaction submission. The custom `eth_sendPrivateRawTransaction` method is automatically registered under the `eth` namespace when the node starts.
+
+## Starting the node
+
+After building the binary, you can run it using the same commands as the standard reth node. The private transaction RPC method will be automatically registered.
+
+### Basic node command
+
+<CodeGroup>
+
+```bash Basic setup
+./target/release/reth-private-transaction node \
+  --authrpc.jwtsecret /data/mainnet/secrets/jwt.hex \
+  --datadir /data/mainnet/ \
+  --http --ws \
+  --http.addr 0.0.0.0 \
+  --ws.addr 0.0.0.0 \
+  --http.api txpool,web3,eth,debug,trace \
+  --ws.api txpool,web3,eth,debug,trace
+```
+
+```bash With custom ports
+./target/release/reth-private-transaction node \
+  --authrpc.jwtsecret /data/mainnet/secrets/jwt.hex \
+  --datadir /data/mainnet/ \
+  --http --ws \
+  --http.addr 0.0.0.0 \
+  --http.port 8545 \
+  --ws.addr 0.0.0.0 \
+  --ws.port 8546 \
+  --http.api txpool,web3,eth,debug,trace \
+  --ws.api txpool,web3,eth,debug,trace
+```
+
+</CodeGroup>
+
+## Configuration parameters
+
+<Steps>
+  <Step title="Authentication and data directory">
+    Configure the JWT secret for consensus client authentication and specify the data directory:
+    
+    ```bash
+    --authrpc.jwtsecret /data/mainnet/secrets/jwt.hex \
+    --datadir /data/mainnet/
+    ```
+    
+    <Warning>
+      The JWT secret must match the one used by your consensus client. 
+      Ensure the file permissions are set correctly (typically 600) for security.
+    </Warning>
+  </Step>
+
+  <Step title="Enable RPC interfaces">
+    Enable HTTP and WebSocket RPC interfaces:
+    
+    ```bash
+    --http --ws \
+    --http.addr 0.0.0.0 \
+    --ws.addr 0.0.0.0
+    ```
+    
+    <Note>
+      Setting the address to `0.0.0.0` allows connections from any network interface. 
+      For production deployments, consider restricting access using firewall rules or 
+      binding to specific interfaces like `127.0.0.1` for local-only access.
+    </Note>
+  </Step>
+
+  <Step title="Configure API namespaces">
+    Specify which API namespaces to expose via HTTP and WebSocket:
+    
+    ```bash
+    --http.api txpool,web3,eth,debug,trace \
+    --ws.api txpool,web3,eth,debug,trace
+    ```
+    
+    The `eth_sendPrivateRawTransaction` method is automatically available under the `eth` namespace.
+  </Step>
+</Steps>
+
+## Verification
+
+Once the node starts, you should see log messages confirming the private transaction method has been registered:
+
+```
+Private transaction method added
+```
+
+### Testing the RPC endpoint
+
+Verify that the node is running and the RPC interface is accessible:
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://localhost:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}'
+```
+
+```bash wscat (WebSocket)
+wscat -c ws://localhost:8546
+> {"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}
+```
+
+</CodeGroup>
+
+## Supported block builders
+
+The private transaction extension automatically forwards transactions to multiple block builders:
+
+- **Titan** - `https://rpc.titanbuilder.xyz`
+- **Beaverbuild** - `https://mevshare-rpc.beaverbuild.org`
+- **rsync-builder** - `https://rsync-builder.xyz`
+
+<Tip>
+  Transactions are sent to all available builders in parallel. If at least one builder 
+  accepts the transaction, the method returns successfully with the transaction hash.
+</Tip>
+
+## Logging
+
+The extension logs important events during operation:
+
+- **Builder initialization**: Confirms which builders are available
+- **Transaction submission**: Records successful submissions and errors
+- **Builder responses**: Logs responses from each builder
+
+Log messages use the following targets:
+- `rpc` - RPC method registration and calls
+- `builder` - Builder communication and responses
+
+## Next steps
+
+With your node running, you can now start sending private transactions. See the [sending transactions guide](/guides/sending-transactions) for detailed examples and best practices.

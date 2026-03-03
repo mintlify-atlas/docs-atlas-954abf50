@@ -1,0 +1,97 @@
+---
+title: Installation
+description: Learn how to build and install the reth-private-transaction binary from source
+---
+
+## Prerequisites
+
+Before building reth-private-transaction, ensure you have the following installed:
+
+- **Rust toolchain** (1.70 or later)
+- **Cargo** package manager
+- **Git** for cloning the repository
+
+<Note>
+  This project is built as an extension to [reth](https://github.com/paradigmxyz/reth), 
+  the modular Ethereum execution client. All reth dependencies will be automatically 
+  fetched during the build process.
+</Note>
+
+## Building from source
+
+The project uses Cargo for building and dependency management. Follow these steps to build the binary:
+
+<Steps>
+  <Step title="Clone the repository">
+    First, clone the reth-private-transaction repository:
+    
+    ```bash
+    git clone <repository-url>
+    cd reth-private-transaction
+    ```
+  </Step>
+
+  <Step title="Build the release binary">
+    Build the project in release mode for optimal performance:
+    
+    ```bash
+    cargo build --release
+    ```
+    
+    <Warning>
+      The build process may take several minutes as it compiles reth and all dependencies. 
+      The release build is optimized for production use and includes all necessary optimizations.
+    </Warning>
+    
+    The compiled binary will be located at `./target/release/reth-private-transaction`.
+  </Step>
+
+  <Step title="Verify the installation">
+    Verify that the binary was built successfully:
+    
+    ```bash
+    ./target/release/reth-private-transaction --version
+    ```
+  </Step>
+</Steps>
+
+## Dependencies
+
+The project relies on the following key dependencies:
+
+### Core reth dependencies
+
+- `reth` - Core reth functionality
+- `reth-node-ethereum` - Ethereum node implementation
+- `reth-transaction-pool` - Transaction pool management
+- `reth-cli` - Command-line interface
+- `reth-rpc-eth-types` - Ethereum RPC types
+- `reth-primitives` - Core primitives
+
+<Tip>
+  All reth dependencies are pinned to revision `v1.1.3` to ensure compatibility. 
+  This is automatically handled by Cargo during the build process.
+</Tip>
+
+### Additional dependencies
+
+- `alloy-primitives` - Ethereum primitives library
+- `jsonrpsee` - JSON-RPC server and client
+- `reqwest` - HTTP client for builder communication
+- `serde` & `serde_json` - Serialization/deserialization
+- `futures` - Asynchronous programming utilities
+
+## Build configuration
+
+The project is configured with the following settings in `Cargo.toml`:
+
+```toml
+[package]
+name = "reth-private-transaction"
+version = "0.1.0"
+edition = "2021"
+```
+
+## Next steps
+
+Once you've successfully built the binary, proceed to the [node setup guide](/guides/node-setup) to learn how to configure and run your reth node with private transaction support.

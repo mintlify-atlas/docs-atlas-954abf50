@@ -1,0 +1,119 @@
+---
+title: 'eth_sendPrivateRawTransaction'
+description: 'Send a signed transaction directly to block builders, bypassing the public mempool'
+---
+
+## Overview
+
+Sends a signed raw transaction privately to multiple block builders, protecting against frontrunning and sandwich attacks. The transaction is kept private until it is included in a block.
+
+<Note>
+This method broadcasts your transaction to all available builders simultaneously. If at least one builder successfully accepts the transaction, the method returns the transaction hash.
+</Note>
+
+## Method signature
+
+```rust
+async fn send_private_raw_transaction(&self, tx: Bytes) -> RpcResult<B256>
+```
+
+Source: `main.rs:51-52`
+
+## Request parameters
+
+<ParamField path="tx" type="Bytes" required>
+  The signed raw transaction data as a hex-encoded string with `0x` prefix.
+  
+  This should be a fully signed transaction that has been encoded according to Ethereum's transaction encoding rules (RLP-encoded).
+</ParamField>
+
+## Response
+
+<ResponseField name="result" type="B256">
+  The transaction hash as a 32-byte hex string with `0x` prefix.
+  
+  This hash uniquely identifies the transaction and can be used to track its status.
+</ResponseField>
+
+## Request example
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "eth_sendPrivateRawTransaction",
+  "params": ["0x..."],
+  "id": 1
+}
+```
+
+## Response example
+
+```json
+{
+  "jsonrpc": "2.0",
+  "result": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+  "id": 1
+}
+```
+
+## Builder network
+
+The transaction is sent to all available builders in parallel:
+
+| Builder | Endpoint | RPC Method |
+|---------|----------|------------|
+| **Titan** | `https://rpc.titanbuilder.xyz` | `eth_sendPrivateTransaction` |
+| **Beaverbuild** | `https://mevshare-rpc.beaverbuild.org` | `eth_sendPrivateRawTransaction` |
+| **rsync-builder** | `https://rsync-builder.xyz` | `eth_sendPrivateRawTransaction` |
+
+Source: `lib.rs:36-50`
+
+<Warning>
+The method succeeds if **at least one** builder accepts the transaction. This means some builders may reject it while others accept it, and the method will still return successfully.
+</Warning>
+
+## Error codes
+
+The method may return the following JSON-RPC errors:
+
+<ResponseField name="-32000" type="PrivateTransactionError">
+  **No builders available**
+  
+  None of the configured builders could be initialized. This typically indicates a configuration or network connectivity issue.
+  
+  Source: `main.rs:60-62`
+</ResponseField>
+
+<ResponseField name="-32001" type="PrivateTransactionError">
+  **All builders failed to send tx**
+  
+  All builders rejected the transaction or failed to respond. The transaction was not accepted by any builder.
+  
+  Source: `main.rs:63-65`
+</ResponseField>
+
+<ResponseField name="Standard RPC errors" type="RpcResult">
+  The method may also return standard JSON-RPC errors if the transaction data is malformed or cannot be decoded. This includes errors from `recover_raw_transaction` when processing the raw transaction bytes.
+  
+  Source: `main.rs:103`
+</ResponseField>
+
+## Implementation details
+
+When you call this method, the following sequence occurs:
+
+1. **Builder initialization** - All available builders are instantiated from the `BuilderKind` enum (`main.rs:71-83`)
+2. **Transaction recovery** - The raw transaction is decoded and the hash is computed (`main.rs:103-104`)
+3. **Parallel broadcast** - The transaction is sent to all builders simultaneously using `join_all` (`main.rs:86`)
+4. **Success validation** - If at least one builder succeeds, the transaction hash is returned (`main.rs:88-92`)
+
+<Note>
+The transaction hash is computed locally before sending to builders, so the returned hash is guaranteed to be correct regardless of which builders accept the transaction.
+</Note>
+
+## Use cases
+
+- Protecting high-value transactions from frontrunning
+- Preventing sandwich attacks on DEX trades
+- Executing time-sensitive transactions with privacy
+- Submitting MEV-sensitive operations without public mempool exposure

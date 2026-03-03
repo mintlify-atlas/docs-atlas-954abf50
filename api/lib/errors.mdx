@@ -1,0 +1,153 @@
+---
+title: BuilderError
+description: Error types for builder operations
+---
+
+## Overview
+
+The `BuilderError` enum represents all possible errors that can occur when interacting with MEV builder endpoints.
+
+## Type definition
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum BuilderError {
+    #[error("HTTP client error: {0}")]
+    ClientError(#[from] reqwest::Error),
+    #[error("Invalid response from builder: {0}")]
+    InvalidResponse(Value),
+}
+```
+
+## Variants
+
+### ClientError
+
+Represents HTTP client errors during requests to builder endpoints.
+
+```rust
+ClientError(#[from] reqwest::Error)
+```
+
+<ParamField path="error" type="reqwest::Error">
+  The underlying HTTP client error from the `reqwest` crate
+</ParamField>
+
+#### When this occurs
+
+- Network connectivity issues
+- DNS resolution failures
+- Connection timeouts
+- TLS/SSL errors
+- Invalid HTTP responses
+- Failed to parse JSON response body
+
+<Note>
+  The `#[from]` attribute enables automatic conversion from `reqwest::Error` to `BuilderError` using the `?` operator.
+</Note>
+
+### InvalidResponse
+
+Represents errors returned by the builder in the JSON-RPC response.
+
+```rust
+InvalidResponse(Value)
+```
+
+<ParamField path="response" type="Value">
+  The full JSON-RPC response body containing the error field
+</ParamField>
+
+#### When this occurs
+
+This error is returned when:
+- The builder's JSON-RPC response contains an `"error"` field
+- The transaction is rejected by the builder
+- The builder returns an invalid or unexpected response format
+
+## Error messages
+
+<ResponseField name="ClientError" type="String">
+  ```
+  HTTP client error: {underlying_error}
+  ```
+</ResponseField>
+
+<ResponseField name="InvalidResponse" type="String">
+  ```
+  Invalid response from builder: {json_response}
+  ```
+</ResponseField>
+
+## Usage example
+
+<Tabs>
+  <Tab title="Handling errors">
+    ```rust
+    use reth_private_transaction::{Builder, BuilderError};
+    use alloy_primitives::Bytes;
+
+    async fn handle_builder_error(builder: &Builder, tx: Bytes) {
+        match builder.send_tx(tx).await {
+            Ok(()) => {
+                info!("Transaction sent successfully");
+            }
+            Err(BuilderError::ClientError(e)) => {
+                error!("HTTP request failed: {}", e);
+            }
+            Err(BuilderError::InvalidResponse(response)) => {
+                warn!("Builder rejected transaction: {:?}", response);
+            }
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="Error propagation">
+    ```rust
+    use reth_private_transaction::{BuilderKind, BuilderError};
+
+    fn create_builder() -> Result<Builder, BuilderError> {
+        // The ? operator automatically converts reqwest::Error to BuilderError::ClientError
+        let builder = BuilderKind::Titan.builder()?;
+        Ok(builder)
+    }
+    ```
+  </Tab>
+  <Tab title="Multiple builders">
+    ```rust
+    use futures::future::join_all;
+
+    async fn try_all_builders(tx: Bytes, builders: Vec<Builder>) -> Result<()> {
+        let results = join_all(
+            builders.iter().map(|builder| builder.send_tx(tx.clone()))
+        ).await;
+
+        if results.iter().all(|r| r.is_err()) {
+            // All builders failed
+            for (i, result) in results.iter().enumerate() {
+                if let Err(e) = result {
+                    warn!("Builder {} failed: {}", i, e);
+                }
+            }
+            return Err(PrivateTransactionError::AllBuildersFailed.into());
+        }
+
+        Ok(())
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Traits
+
+<ParamField path="Debug" type="trait">
+  Enables debug formatting with `{:?}`
+</ParamField>
+
+<ParamField path="Error" type="trait">
+  Implements `std::error::Error` via the `thiserror` crate for error handling
+</ParamField>
+
+## Source reference
+
+Defined in `src/lib.rs:7-13`
